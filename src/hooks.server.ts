@@ -1,5 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
 import { building } from '$app/environment';
+import { getSessionCookie } from 'better-auth/cookies';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { getAuth } from '$lib/server/better-auth';
 import { createDatabase, getPool } from '$lib/server/database';
@@ -8,7 +9,7 @@ export const handle: Handle = async ({ event, resolve }) => {
  const pool = getPool();
  event.locals.user = null;
  event.locals.isAdmin = false;
- if (auth && !building) {
+ if (auth && !building && getSessionCookie(event.request)) {
   const session = await auth.api.getSession({ headers: event.request.headers });
   event.locals.user = session?.user ?? null;
  }

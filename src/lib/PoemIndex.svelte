@@ -1,5 +1,6 @@
 <script lang="ts">
  import { useLanguage } from '$lib/i18n.svelte';
+ import LoadingIndicator from './LoadingIndicator.svelte';
  import { page } from '$app/state';
  import { goto } from '$app/navigation';
  import { onDestroy } from 'svelte';
@@ -7,7 +8,7 @@
  import type { CollectionResult, CollectionStats } from '$lib/content';
  import type { CollectionOptions } from '$lib/catalog';
  const language = useLanguage();
- let { savedOnly = false, result, stats, options }: { savedOnly?: boolean; result: CollectionResult; stats: CollectionStats; options: CollectionOptions } = $props();
+ let { savedOnly = false, pending = false, result, stats, options }: { savedOnly?: boolean; pending?: boolean; result: CollectionResult; stats: CollectionStats; options: CollectionOptions } = $props();
  let savedResult = $state<CollectionResult>({ poems: [], total: 0, page: 1, pageCount: 1 });
  let loading = $state(false);
  let loadError = $state('');
@@ -69,7 +70,7 @@
   <div class="theme-filters" aria-label={language.t('Filter by theme', 'ជ្រើសរើសតាមប្រធានបទ')}>{#each themes as item}<button class:selected={theme === item} aria-pressed={theme === item} onclick={() => update('theme', item)}>{language.theme(item)}</button>{/each}</div>
   <span class="result-count" aria-live="polite">{language.number(collection.total)} {language.t(collection.total === 1 ? 'poem' : 'poems', 'កំណាព្យ')}</span>
  </div>
- {#if savedOnly && loading}<p class="form-notice" role="status">{language.t('Loading your reading list…', 'កំពុងបង្ហាញបញ្ជីអាន…')}</p>
+ {#if savedOnly && loading}<LoadingIndicator label={language.t('Loading your reading list…', 'កំពុងបង្ហាញបញ្ជីអាន…')} />
  {:else if loadError}<p class="form-notice error" role="alert">{loadError} <button class="plain-button" onclick={() => retry++}>{language.t('Retry', 'ព្យាយាមម្ដងទៀត')}</button></p>
  {:else if visible.length}
   <table class="poem-table">
@@ -81,8 +82,8 @@
     <td class="bookmark-cell"><button class="save-button" class:saved={readingList.slugs.includes(poem.slug)} onclick={() => toggleSaved(poem.slug)} aria-label={readingList.slugs.includes(poem.slug) ? language.t(`Remove ${poem.title} from reading list`, `ដក ${poem.khmer} ចេញពីបញ្ជីអាន`) : language.t(`Save ${poem.title}`, `រក្សាទុក ${poem.khmer}`)} aria-pressed={readingList.slugs.includes(poem.slug)}><svg viewBox="0 0 24 24" fill={readingList.slugs.includes(poem.slug) ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4z"/></svg></button></td>
    </tr>{/each}</tbody>
   </table>
- {:else}
+ {:else if !pending}
   <div class="empty-state"><h2>{savedOnly && !readingList.slugs.length ? language.t('No saved poems yet.', 'មិនទាន់មានកំណាព្យក្នុងបញ្ជីអាន។') : language.t('No poems found.', 'រកមិនឃើញកំណាព្យ។')}</h2><p>{savedOnly && !readingList.slugs.length ? language.t('Use the bookmark beside a poem to save it here.', 'ចុចសញ្ញាចំណាំនៅជាប់កំណាព្យ ដើម្បីរក្សាទុកនៅទីនេះ។') : language.t('Try a different search or theme.', 'សាកល្បងពាក្យស្វែងរក ឬប្រធានបទផ្សេងទៀត។')}</p>{#if query || theme !== 'All works'}<button class="plain-button" onclick={reset}>{language.t('Clear filters', 'សម្អាតការជ្រើសរើស')}</button>{:else if savedOnly}<a class="text-link" href="/collection">{language.t('Browse all poems →', 'មើលកំណាព្យទាំងអស់ →')}</a>{/if}</div>
  {/if}
- {#if pageCount > 1 && !loading && !loadError}<nav class="pagination" aria-label={language.t('Collection pages', 'ទំព័របណ្ដុំកំណាព្យ')}><button disabled={currentPage === 1} onclick={() => update('page', String(currentPage - 1))}>{language.t('← Previous', '← មុន')}</button><span aria-live="polite">{language.t('Page', 'ទំព័រ')} {language.number(currentPage)} {language.t('of', 'នៃ')} {language.number(pageCount)}</span><button disabled={currentPage === pageCount} onclick={() => update('page', String(currentPage + 1))}>{language.t('Next →', 'បន្ទាប់ →')}</button></nav>{/if}
+ {#if pageCount > 1 && !pending && !loading && !loadError}<nav class="pagination" aria-label={language.t('Collection pages', 'ទំព័របណ្ដុំកំណាព្យ')}><button disabled={currentPage === 1} onclick={() => update('page', String(currentPage - 1))}>{language.t('← Previous', '← មុន')}</button><span aria-live="polite">{language.t('Page', 'ទំព័រ')} {language.number(currentPage)} {language.t('of', 'នៃ')} {language.number(pageCount)}</span><button disabled={currentPage === pageCount} onclick={() => update('page', String(currentPage + 1))}>{language.t('Next →', 'បន្ទាប់ →')}</button></nav>{/if}
 </div>

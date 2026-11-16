@@ -1,4 +1,4 @@
-// Shared types only. Collection data stays on the server.
+// Shared types. Only the small sample collection is bundled in the client.
 export type Poem = {
  isSample?: boolean;
  isExcerpt?: boolean;

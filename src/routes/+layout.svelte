@@ -1,7 +1,8 @@
 <script lang="ts">
  import '../app.css';
  import { setContext, untrack } from 'svelte';
- import { page } from '$app/state';
+ import LoadingIndicator from '$lib/LoadingIndicator.svelte';
+ import { page, navigating } from '$app/state';
  import { readingList } from '$lib/state.svelte';
  import { SiteLanguage, LANGUAGE_CONTEXT } from '$lib/i18n.svelte';
  let { data, children } = $props();
@@ -26,6 +27,7 @@
    </div>
   </nav>
  </header>
+ {#if navigating}<div class="page-width"><LoadingIndicator label={language.t('Loading page…', 'កំពុងផ្ទុកទំព័រ…')} /></div>{/if}
  <main id="main">{@render children()}</main>
  <footer class="site-footer page-width"><span>© {language.number(new Date().getFullYear())} {language.t('Aksara', 'អក្សរ')}</span><a href="/about">{language.t('About', 'អំពីយើង')}</a></footer>
 </div>

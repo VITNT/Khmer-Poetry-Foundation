@@ -57,7 +57,16 @@ Better Auth handles `/api/auth/*`; successful magic links return through
 run in a transaction with `SET LOCAL ROLE` and a server-verified user ID.
 Row-level policies protect drafts, author ownership and moderation; restricted
 column grants protect source metadata. PostgreSQL enforces the daily submission
-limit. Account state is never publicly cached.
+limit. Account state is never publicly cached. Published poem details and collection
+statistics use a bounded, per-server 30-second memory cache that also shares
+concurrent reads. Editorial decisions clear that server's cache immediately;
+other running instances refresh within 30 seconds. Collection pagination and
+poem recommendations each load in a single SQL query. The collection ships six small sample poems in the frontend and renders them
+before fetching the complete, filtered archive in the background. A loading
+indicator explains the partial results, and failed refreshes retain the bundled
+poems with a Retry button. Page navigation and saved-list fetches also display
+loading indicators. The complete archive and unbundled poem pages may still
+wait for Neon to wake up on the first request.
 
 ## Existing Supabase data
 

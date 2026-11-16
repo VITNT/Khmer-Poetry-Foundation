@@ -1,4 +1,5 @@
 import { fail, redirect } from '@sveltejs/kit';
+import { publicPoemCache } from '$lib/server/public-poem-cache';
 import { requireAdmin } from '$lib/server/auth';
 import { databaseError, toSubmission } from '$lib/server/poems';
 import type { Actions, PageServerLoad } from './$types';
@@ -24,6 +25,7 @@ export const actions: Actions = {
    result = await db.query("update poems set status = $1 where id::text = $2 and status = 'pending' and updated_at = $3::timestamptz returning id", [status, id, updatedAt]);
   } catch { return fail(400, { message: 'The review could not be saved. Please try again.' }); }
   if (!result.rows[0]) return fail(409, { message: 'This submission changed or was already reviewed. Reload before reviewing it.' });
+  publicPoemCache.clear();
   redirect(303, '/admin?reviewed=1');
  }
 };

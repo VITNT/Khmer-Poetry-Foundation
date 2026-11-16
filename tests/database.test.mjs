@@ -114,3 +114,34 @@ test('server queries save and edit drafts, reject stale writes, and escape searc
  const identity = await db.query("select current_user, nullif(current_setting('app.user_id', true), '') as id");
  assert.notEqual(identity.rows[0].current_user, 'authenticated');
 });
+
+test('public page queries use one read and preserve paging, search, and privacy', async () => {
+ const { moduleURL } = await import('./load-server-module.mjs');
+ const { listPoems, poemBySlug } = await import(moduleURL('src/lib/server/poems.ts'));
+ const { publicPoemCache } = await import(moduleURL('src/lib/server/public-poem-cache.ts'));
+ publicPoemCache.clear();
+ let reads = 0;
+ const reader = { query: (text, values) => {
+  reads++;
+  return as('anon', null, () => db.query(text, values));
+ } };
+ const options = { query: '', theme: 'All works', locale: 'en', sort: 'asc', page: 100000 };
+ const page = await listPoems(reader, options);
+ assert.equal(reads, 1);
+ assert.equal(page.page, page.pageCount);
+ assert.ok(page.poems.length > 0);
+ const empty = await listPoems(reader, { ...options, query: 'no-such-poem-xyz' });
+ assert.deepEqual(empty, { poems: [], total: 0, page: 1, pageCount: 1 });
+ const filtered = await listPoems(reader, { ...options, slugs: ['chbab-lboek-thmei'], locale: 'km', sort: 'desc' });
+ assert.equal(filtered.total, 1);
+ assert.equal(filtered.poems[0].slug, 'chbab-lboek-thmei');
+ const before = reads;
+ const detail = await poemBySlug(reader, 'chbab-lboek-thmei');
+ assert.equal(reads, before + 1);
+ assert.equal(detail.poem.slug, 'chbab-lboek-thmei');
+ assert.equal(detail.related.length, 3);
+ assert.ok(detail.related.every(p => p.slug !== detail.poem.slug && p.lines === undefined));
+ await poemBySlug(reader, 'chbab-lboek-thmei');
+ assert.equal(reads, before + 1);
+ await assert.rejects(poemBySlug(reader, 'missing-poem'), e => e.status === 404);
+});

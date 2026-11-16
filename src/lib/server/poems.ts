@@ -1,4 +1,5 @@
 import { error } from '@sveltejs/kit';
+import { publicPoemCache } from './public-poem-cache';
 import type { Database } from './database';
 import type { CollectionResult, CollectionStats, Poem, PoemSummary, Submission } from '$lib/content';
 import { normalizeSearch, pageSize, themeNames, type CollectionOptions } from '$lib/catalog';
@@ -37,17 +38,25 @@ export async function listPoems(db: Database | null, options: CollectionOptions)
  if (options.slugs) where.push(`slug = any(${param(options.slugs)}::text[])`);
  const condition = where.join(' and ');
  try {
-  const count = await db.query(`select count(*)::int as total from poems where ${condition}`, values);
-  const total = count.rows[0].total;
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const page = Math.min(options.page, pageCount);
   const order = options.locale === 'km' ? 'khmer' : 'title';
-  const result = await db.query(`select ${summaryColumns} from poems where ${condition} order by ${order} ${options.sort === 'asc' ? 'asc' : 'desc'}, slug limit ${pageSize} offset ${(page - 1) * pageSize}`, values);
-  return { poems: result.rows.map(toSummary), total, page, pageCount };
+  // Count and fetch the clamped page in one database round trip, including empty results.
+  const result = await db.query(`
+   with totals as (select count(*)::int as total from poems where ${condition}),
+   pagination as (select total, greatest(1, ceil(total::numeric / ${pageSize})::int) as page_count from totals),
+   bounds as (select *, least(${param(options.page)}::int, page_count) as page from pagination)
+   select total, page, page_count,
+    (select coalesce(jsonb_agg(row_to_json(items)), '[]'::jsonb) from (
+     select ${summaryColumns} from poems where ${condition}
+     order by ${order} ${options.sort === 'asc' ? 'asc' : 'desc'}, slug
+     limit ${pageSize} offset (select (page - 1) * ${pageSize} from bounds)
+    ) items) as poems
+   from bounds`, values);
+  const row = result.rows[0];
+  return { poems: row.poems.map(toSummary), total: row.total, page: row.page, pageCount: row.page_count };
  } catch (cause) { databaseError(cause as Error); }
 
 }
-export async function collectionStats(db: Database | null): Promise<CollectionStats> {
+async function uncachedCollectionStats(db: Database | null): Promise<CollectionStats> {
  if (!db) {
   const { poems, sourcedCount, sampleCount, themes } = await import('./seed');
   return { total: poems.length, sourcedCount, sampleCount, communityCount: 0, themes: themes.filter(theme => theme !== 'All works') };
@@ -57,7 +66,7 @@ export async function collectionStats(db: Database | null): Promise<CollectionSt
   return result.rows[0].stats as CollectionStats;
  } catch (cause) { databaseError(cause as Error); }
 }
-export async function poemBySlug(db: Database | null, slug: string) {
+async function uncachedPoemBySlug(db: Database | null, slug: string) {
  if (!db) {
   const { poems } = await import('./seed');
   const poem = poems.find(p => p.slug === slug);
@@ -67,14 +76,29 @@ export async function poemBySlug(db: Database | null, slug: string) {
  let data: Row;
  let related: Row[];
  try {
-  const result = await db.query("select * from poems where slug = $1 and status = 'published'", [slug]);
+  const result = await db.query(`
+   select p.*, (
+    select coalesce(jsonb_agg(row_to_json(items)), '[]'::jsonb) from (
+     select ${summaryColumns} from poems
+     where status = 'published' and slug <> $1 and is_sample = p.is_sample
+     order by slug limit 3
+    ) items
+   ) as related
+   from poems p where p.slug = $1 and p.status = 'published'`, [slug]);
   if (!result.rows[0]) error(404, 'This work could not be found.');
   data = result.rows[0];
-  const resultRelated = await db.query(`select ${summaryColumns} from poems where status = 'published' and slug <> $1 and is_sample = $2 order by slug limit 3`, [slug, data.is_sample]);
-  related = resultRelated.rows;
+  related = data.related;
  } catch (cause) {
   if (typeof cause === 'object' && cause && 'status' in cause) throw cause;
   databaseError(cause as Error);
  }
  return { poem: toPoem(data), related: related.map(toSummary) };
+}
+
+// Only explicitly public data is shared; personalized lists and drafts never enter this cache.
+export function collectionStats(db: Database | null): Promise<CollectionStats> {
+ return db ? publicPoemCache.get('stats', () => uncachedCollectionStats(db)) : uncachedCollectionStats(db);
+}
+export function poemBySlug(db: Database | null, slug: string) {
+ return db ? publicPoemCache.get(`poem:${slug}`, () => uncachedPoemBySlug(db, slug)) : uncachedPoemBySlug(db, slug);
 }

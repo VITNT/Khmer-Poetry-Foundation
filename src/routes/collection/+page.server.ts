@@ -3,9 +3,11 @@ import { listPoems, collectionStats } from '$lib/server/poems';
 import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ locals, url, cookies }) => {
  const options = collectionOptions(url.searchParams, cookies.get('aksara-language') || 'en');
+ // Render bundled client poems immediately; fetch the live archive after hydration.
+ if (locals.db) return { result: null, stats: null, options, refreshCollection: true };
  const [result, stats] = await Promise.all([
-  url.searchParams.has('saved') ? { poems: [], total: 0, page: 1, pageCount: 1 } : listPoems(locals.db, options),
-  collectionStats(locals.db)
+  url.searchParams.has('saved') ? { poems: [], total: 0, page: 1, pageCount: 1 } : listPoems(null, options),
+  collectionStats(null)
  ]);
- return { result, stats, options };
+ return { result, stats, options, refreshCollection: false };
 };
