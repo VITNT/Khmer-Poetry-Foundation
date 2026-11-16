@@ -9,6 +9,6 @@ export const POST: RequestHandler = async ({ request, locals, url, cookies }) =>
  let slugs: unknown;
  try { slugs = JSON.parse(text).slugs; } catch { error(400, 'Invalid reading list.'); }
  if (!Array.isArray(slugs) || slugs.length > 500 || !slugs.every(s => typeof s === 'string' && /^[a-z0-9][a-z0-9-]{0,119}$/.test(s))) error(400, 'Invalid reading list.');
- const result = await listPoems(locals.supabase, { ...collectionOptions(url.searchParams, cookies.get('aksara-language') || 'en'), slugs: [...new Set(slugs)] });
+ const result = await listPoems(locals.db, { ...collectionOptions(url.searchParams, cookies.get('aksara-language') || 'en'), slugs: [...new Set(slugs)] });
  return json(result, { headers: { 'cache-control': 'private, no-store' } });
 };

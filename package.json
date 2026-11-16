@@ -12,7 +12,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "node --test tests/*.test.mjs",
-    "db:seed": "node scripts/generate-supabase-seed.mjs"
+    "db:seed": "node scripts/generate-neon-seed.mjs",
+    "db:migrate": "node --env-file=.env scripts/migrate-neon.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.15",
@@ -22,10 +23,11 @@
     "svelte": "^5.38.0",
     "svelte-check": "^4.3.0",
     "typescript": "^5.9.0",
-    "vite": "^7.1.0"
+    "vite": "^7.1.0",
+    "@types/pg": "^8.15.6"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.12.7",
-    "@supabase/supabase-js": "^2.119.0"
+    "better-auth": "^1.4.0",
+    "pg": "^8.16.3"
   }
 }

@@ -1,5 +1,11 @@
 begin;
 
+-- Run as the Neon database owner. These roles have no login privileges.
+create role anon nologin;
+create role authenticated nologin;
+grant anon, authenticated to current_user;
+grant usage on schema public to anon, authenticated;
+
 create schema if not exists extensions;
 create extension if not exists pg_trgm with schema extensions;
 create schema if not exists private;
@@ -7,18 +13,18 @@ revoke all on schema private from public, anon, authenticated;
 
 -- Admin membership can only be changed from SQL/the trusted project backend.
 create table private.site_admins (
- user_id uuid primary key references auth.users(id) on delete cascade
+ user_id text primary key references public."user"(id) on delete cascade
 );
 alter table private.site_admins enable row level security;
 create function public.is_admin() returns boolean
 language sql stable security definer set search_path = ''
-as $$ select exists(select 1 from private.site_admins where user_id = (select auth.uid())) $$;
+as $$ select exists(select 1 from private.site_admins where user_id = (select nullif(current_setting('app.user_id', true), ''))) $$;
 revoke all on function public.is_admin() from public;
 grant execute on function public.is_admin() to authenticated;
 
 create table public.poems (
  id uuid primary key default gen_random_uuid(),
- owner_id uuid references auth.users(id) on delete cascade,
+ owner_id text references public."user"(id) on delete cascade,
  slug text not null unique check (slug ~ '^[a-z0-9][a-z0-9-]{0,119}$'),
  title text not null check (char_length(btrim(title)) between 1 and 200),
  khmer text not null check (char_length(btrim(khmer)) between 1 and 200),
@@ -85,13 +91,13 @@ grant insert (owner_id, slug, title, khmer, author, author_khmer, theme, descrip
 grant update (title, khmer, author, author_khmer, theme, description, lines, khmer_lines, status) on public.poems to authenticated;
 
 create policy published_poems on public.poems for select to anon, authenticated using (status = 'published');
-create policy own_submissions on public.poems for select to authenticated using (owner_id = (select auth.uid()));
+create policy own_submissions on public.poems for select to authenticated using (owner_id = (select nullif(current_setting('app.user_id', true), '')));
 create policy admin_reads on public.poems for select to authenticated using ((select public.is_admin()));
 create policy submit_own_poems on public.poems for insert to authenticated
-with check (owner_id = (select auth.uid()) and status in ('draft', 'pending') and not coalesce(((select auth.jwt())->>'is_anonymous')::boolean, false));
+with check (owner_id = (select nullif(current_setting('app.user_id', true), '')) and status in ('draft', 'pending'));
 create policy edit_own_drafts on public.poems for update to authenticated
-using (owner_id = (select auth.uid()) and status in ('draft', 'rejected'))
-with check (owner_id = (select auth.uid()) and status in ('draft', 'pending'));
+using (owner_id = (select nullif(current_setting('app.user_id', true), '')) and status in ('draft', 'rejected'))
+with check (owner_id = (select nullif(current_setting('app.user_id', true), '')) and status in ('draft', 'pending'));
 create policy admin_moderation on public.poems for update to authenticated
 using ((select public.is_admin())) with check ((select public.is_admin()));
 

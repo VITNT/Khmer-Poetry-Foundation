@@ -1,9 +1,9 @@
-import type { SupabaseClient, User } from '@supabase/supabase-js';
+import type { Database } from '$lib/server/database';
 declare global {
  namespace App {
   interface Locals {
-   supabase: SupabaseClient | null;
-   user: User | null;
+   db: Database | null;
+   user: { id: string; email: string } | null;
    isAdmin: boolean;
   }
  }

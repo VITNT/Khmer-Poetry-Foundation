@@ -1,23 +1,26 @@
 import type { Handle } from '@sveltejs/kit';
-import { createSupabase } from '$lib/server/supabase';
+import { building } from '$app/environment';
+import { svelteKitHandler } from 'better-auth/svelte-kit';
+import { getAuth } from '$lib/server/better-auth';
+import { createDatabase, getPool } from '$lib/server/database';
 export const handle: Handle = async ({ event, resolve }) => {
- event.locals.supabase = createSupabase(event);
+ const auth = getAuth();
+ const pool = getPool();
  event.locals.user = null;
  event.locals.isAdmin = false;
- // getUser validates the token with Supabase; cookie contents alone are not trusted.
- if (event.locals.supabase && event.cookies.getAll().some(cookie => cookie.name.startsWith('sb-'))) {
-  const { data, error } = await event.locals.supabase.auth.getUser();
-  if (!error && data.user) {
-   event.locals.user = data.user;
-   const { data: isAdmin, error: adminError } = await event.locals.supabase.rpc('is_admin');
-   event.locals.isAdmin = !adminError && isAdmin === true;
-  }
+ if (auth && !building) {
+  const session = await auth.api.getSession({ headers: event.request.headers });
+  event.locals.user = session?.user ?? null;
  }
- const response = await resolve(event, {
-  filterSerializedResponseHeaders: name => name === 'content-range' || name === 'x-supabase-api-version',
+ event.locals.db = pool ? createDatabase(pool, event.locals.user?.id ?? null) : null;
+ if (event.locals.user && event.locals.db) {
+  const result = await event.locals.db.query('select public.is_admin() as value');
+  event.locals.isAdmin = result.rows[0]?.value === true;
+ }
+ const render: typeof resolve = (event) => resolve(event, {
   transformPageChunk: ({ html }) => html.replace('<html lang="en">', `<html lang="${event.cookies.get('aksara-language') === 'km' ? 'km' : 'en'}">`)
  });
- // HTML and load responses contain account state and may refresh auth cookies.
- if (event.route.id) response.headers.set('cache-control', 'private, no-store');
+ const response = auth ? await svelteKitHandler({ event, resolve: render, auth, building }) : await render(event);
+ response.headers.set('cache-control', 'private, no-store');
  return response;
 };

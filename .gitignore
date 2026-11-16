@@ -7,4 +7,4 @@ build
 !.env.example
 .DS_Store
 *.log
-supabase/seed.sql
+neon/seed.sql

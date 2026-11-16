@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
-import { seedSQL } from '../scripts/generate-supabase-seed.mjs';
+import { seedSQL } from '../scripts/generate-neon-seed.mjs';
 
 const db = new PGlite({ extensions: { pg_trgm } });
 const alice = '11111111-1111-4111-8111-111111111111';
@@ -11,7 +11,7 @@ const bob = '22222222-2222-4222-8222-222222222222';
 const admin = '33333333-3333-4333-8333-333333333333';
 async function as(role, id, fn) {
  await db.exec(`set role ${role};`);
- await db.query("select set_config('request.jwt.claims', $1, false)", [JSON.stringify({ sub: id, role })]);
+ await db.query("select set_config('app.user_id', $1, false)", [id || '']);
  try { return await fn(); } finally { await db.exec('reset role'); }
 }
 async function insert(slug, status = 'draft', owner = alice) {
@@ -19,15 +19,10 @@ async function insert(slug, status = 'draft', owner = alice) {
 }
 before(async () => {
  await db.exec(`
- create role anon; create role authenticated;
- create schema auth;
- create table auth.users (id uuid primary key);
- grant usage on schema auth to anon, authenticated;
- create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
- create function auth.uid() returns uuid language sql stable as $$ select (auth.jwt()->>'sub')::uuid $$;
- insert into auth.users values ('${alice}'),('${bob}'),('${admin}');
+ create table public."user" (id text primary key);
+ insert into public."user" values ('${alice}'),('${bob}'),('${admin}');
  `);
- await db.exec(readFileSync(new URL('../supabase/migrations/202611080001_poems.sql', import.meta.url), 'utf8'));
+ await db.exec(readFileSync(new URL('../neon/migrations/202611080001_poems.sql', import.meta.url), 'utf8'));
  await db.query('insert into private.site_admins values ($1)', [admin]);
  await db.exec(seedSQL());
 });
@@ -83,4 +78,39 @@ test('body limits and the daily creation cap apply at the database', async () =>
  await assert.rejects(as('authenticated', bob, () => db.query(`insert into poems(owner_id,slug,title,khmer,author,theme,lines) values ($1,'too-long','T','T','A','Memory',array[$2])`, [bob, 'x'.repeat(50001)])), /check constraint/);
  for (let i = 0; i < 10; i++) await as('authenticated', bob, () => insert(`rate-limit-${i}`, 'draft', bob));
  await assert.rejects(as('authenticated', bob, () => insert('rate-limit-excess', 'draft', bob)), /Daily limit/);
+});
+
+// Execute the actual server queries against PostgreSQL, not a mock query builder.
+test('server queries save and edit drafts, reject stale writes, and escape search wildcards', async () => {
+ const { moduleURL } = await import('./load-server-module.mjs');
+ const { createDatabase } = await import(moduleURL('src/lib/server/database.ts'));
+ const { saveSubmission, loadSubmission } = await import(moduleURL('src/lib/server/submissions.ts'));
+ const { listPoems } = await import(moduleURL('src/lib/server/poems.ts'));
+ const connection = { query: (sql, values) => db.query(sql, values), release() {} };
+ const pool = { connect: async () => connection };
+ const queries = createDatabase(pool, alice);
+ const form = () => {
+  const data = new FormData();
+  for (const [key, value] of Object.entries({ title: 'Query test', author: 'Alice', theme: 'Memory', englishText: 'A line', permission: 'yes' })) data.set(key, value);
+  return data;
+ };
+ const event = (data, id) => ({ locals: { db: queries, user: { id: alice } }, params: { id }, request: { formData: async () => data } });
+ await assert.rejects(saveSubmission(event(form()), 'draft'), e => e.status === 303);
+ const saved = await db.query("select id, updated_at::text as updated from poems where title = 'Query test'");
+ const id = saved.rows[0].id;
+ assert.equal((await loadSubmission(event(form(), id))).title, 'Query test');
+ const revised = form();
+ revised.set('updatedAt', saved.rows[0].updated);
+ revised.set('title', 'Query revised');
+ await assert.rejects(saveSubmission(event(revised, id), 'draft', true), e => e.status === 303);
+ const stale = await saveSubmission(event(revised, id), 'draft', true);
+ assert.equal(stale.status, 409);
+ const options = { query: '%', theme: 'All works', locale: 'en', sort: 'asc', page: 1 };
+ const search = await listPoems(createDatabase(pool, null), options);
+ assert.equal(search.total, 0);
+ const publicResult = await listPoems(createDatabase(pool, null), { ...options, query: '' });
+ assert.ok(publicResult.total >= 15);
+ // Transaction-local identity and role must not leak onto pooled connections.
+ const identity = await db.query("select current_user, nullif(current_setting('app.user_id', true), '') as id");
+ assert.notEqual(identity.rows[0].current_user, 'authenticated');
 });
